@@ -1,0 +1,82 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: ridebid_db
+    restart: always
+    environment:
+      POSTGRES_DB: ridebid_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: shanpan
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # ---------------------------------------------
+  # Redis Cache & Message Broker
+  # ---------------------------------------------
+  redis:
+    image: redis:7
+    container_name: ridebid_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # ---------------------------------------------
+  # Django Web Server (ASGI / Daphne)
+  # ---------------------------------------------
+  web:
+    build: .
+    container_name: ridebid_web
+    restart: always
+    command: bash -c "python manage.py migrate && daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=django-insecure-change-this-to-a-real-secret-key-in-production
+      - DB_NAME=ridebid_db
+      - DB_USER=postgres
+      - DB_PASSWORD=shanpan
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+
+  # ---------------------------------------------
+  # Celery Worker for Background Tasks
+  # ---------------------------------------------
+  celery:
+    build: .
+    container_name: ridebid_celery
+    restart: always
+    command: celery -A config worker -l info
+    environment:
+      - DEBUG=True
+      - SECRET_KEY=django-insecure-change-this-to-a-real-secret-key-in-production
+      - DB_NAME=ridebid_db
+      - DB_USER=postgres
+      - DB_PASSWORD=shanpan
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+      - web
+
+volumes:
+  postgres_data:
+  redis_data:

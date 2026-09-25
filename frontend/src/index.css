@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ridebid-green: #4f772d;
+  --color-ridebid-black: #0a0a0a;
+  --color-ridebid-true-black: #000000;
+  
+  --font-sans: 'Outfit', 'Inter', sans-serif;
+  --font-mono: 'Fira Code', 'JetBrains Mono', monospace;
+  
+  --animate-marquee: marquee 20s linear infinite;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-100%); }
+}
+
+@layer base {
+  body {
+    @apply bg-ridebid-black text-white font-sans overflow-x-hidden;
+  }
+}
+
+/* Custom Brutalist Utilities */
+@layer utilities {
+  .brutal-border {
+    @apply border-2 border-ridebid-green;
+  }
+  .brutal-border-white {
+    @apply border-2 border-white;
+  }
+  .brutal-shadow {
+    box-shadow: 4px 4px 0px var(--color-ridebid-green);
+  }
+  .brutal-shadow-hover:hover {
+    box-shadow: 2px 2px 0px var(--color-ridebid-green);
+    transform: translate(2px, 2px);
+  }
+  .brutal-shadow-white {
+    box-shadow: 4px 4px 0px #ffffff;
+  }
+}
