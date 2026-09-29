@@ -28,10 +28,10 @@ class User(AbstractUser):
 
 class DriverDetail(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="driver_detail")
-    license_number = models.CharField(max_length=50, unique=True)
-    license_expiry = models.DateField()
-    vehicle_number = models.CharField(max_length=20, unique=True)
-    vehicle_type = models.CharField(max_length=10, choices=VehicleType.choices)
+    license_number = models.CharField(max_length=50, unique=True, null=True, blank=True)
+    license_expiry = models.DateField(null=True, blank=True)
+    vehicle_number = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    vehicle_type = models.CharField(max_length=10, choices=VehicleType.choices, null=True, blank=True)
     vehicle_model = models.CharField(max_length=100, blank=True, null=True)
     is_approved = models.BooleanField(default=False)
     rating = models.FloatField(default=0.0)
