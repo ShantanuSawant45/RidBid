@@ -1,6 +1,8 @@
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const CtaSection: React.FC = () => {
+  const navigate = useNavigate();
   return (
     <section className="bg-black py-32 px-4 relative border-t-4 border-white overflow-hidden">
       {/* Decorative Background Elements */}
@@ -22,7 +24,7 @@ const CtaSection: React.FC = () => {
         </div>
 
         <div className="grid md:grid-cols-2 gap-12 max-w-5xl mx-auto">
-          
+
           {/* Rider Card */}
           <div className="bg-ridebid-green border-4 border-white p-8 md:p-12 flex flex-col brutal-shadow-white transform transition-transform hover:-translate-y-2 group">
             <div className="flex justify-between items-start mb-8">
@@ -30,15 +32,15 @@ const CtaSection: React.FC = () => {
               <span className="text-5xl">🚕</span>
             </div>
             <p className="font-mono text-black font-bold mb-10 flex-grow text-lg">
-              &gt; SET YOUR OWN PRICE.<br/>
-              &gt; NO SURGE PRICING BS.<br/>
+              &gt; SET YOUR OWN PRICE.<br />
+              &gt; NO SURGE PRICING BS.<br />
               &gt; GET THERE FASTER.
             </p>
             <div className="flex flex-col gap-4">
-              <button className="w-full bg-black text-white border-2 border-black font-mono font-bold text-xl py-4 uppercase brutal-shadow transition-all group-hover:bg-white group-hover:text-black">
+              <button onClick={() => navigate("/register")} className="w-full bg-black text-white border-2 border-black font-mono font-bold text-xl py-4 uppercase brutal-shadow transition-all group-hover:bg-white group-hover:text-black">
                 Sign Up as Rider
               </button>
-              <button className="w-full bg-transparent text-black border-2 border-black font-mono font-bold py-3 uppercase hover:bg-black hover:text-white transition-colors">
+              <button onClick={() => navigate("/login")} className="w-full bg-transparent text-black border-2 border-black font-mono font-bold py-3 uppercase hover:bg-black hover:text-white transition-colors">
                 Login
               </button>
             </div>
@@ -51,15 +53,15 @@ const CtaSection: React.FC = () => {
               <span className="text-5xl">🏎️</span>
             </div>
             <p className="font-mono text-gray-700 font-bold mb-10 flex-grow text-lg">
-              &gt; KEEP 100% OF THE BID.<br/>
-              &gt; YOU ARE THE BOSS.<br/>
+              &gt; KEEP 100% OF THE BID.<br />
+              &gt; YOU ARE THE BOSS.<br />
               &gt; EARN ON YOUR TERMS.
             </p>
             <div className="flex flex-col gap-4">
-              <button className="w-full bg-ridebid-green text-black border-2 border-black font-mono font-bold text-xl py-4 uppercase brutal-shadow transition-all group-hover:bg-black group-hover:text-ridebid-green group-hover:border-ridebid-green">
+              <button onClick={() => navigate('/register')} className="w-full bg-ridebid-green text-black border-2 border-black font-mono font-bold text-xl py-4 uppercase brutal-shadow transition-all group-hover:bg-black group-hover:text-ridebid-green group-hover:border-ridebid-green">
                 Sign Up as Driver
               </button>
-              <button className="w-full bg-transparent text-black border-2 border-black font-mono font-bold py-3 uppercase hover:bg-black hover:text-white transition-colors">
+              <button onClick={() => navigate("/login")} className="w-full bg-transparent text-black border-2 border-black font-mono font-bold py-3 uppercase hover:bg-black hover:text-white transition-colors">
                 Login
               </button>
             </div>

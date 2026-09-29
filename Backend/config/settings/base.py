@@ -10,6 +10,13 @@ from datetime import timedelta
 
 import environ
 
+if os.name == 'nt':
+    try:
+        os.add_dll_directory(r'C:\Program Files\PostgreSQL\18\bin')
+    except Exception:
+        pass
+
+
 # ============================================================
 # GDAL/GEOS Configuration (Windows — PostGIS bundles them)
 # ============================================================
@@ -43,6 +50,7 @@ DJANGO_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'django.contrib.gis',
+    'corsheaders',
 ]
 
 THIRD_PARTY_APPS = [
@@ -69,6 +77,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -208,4 +217,4 @@ CELERY_TASK_TIME_LIMIT = 300  # 5 minutes max per task
 # Custom User Model (we'll define this in apps.users)
 # ============================================================
 
-AUTH_USER_MODEL = 'users.CustomUser'
+AUTH_USER_MODEL = 'users.User'

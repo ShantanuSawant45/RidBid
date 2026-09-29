@@ -25,7 +25,7 @@ from django.db import transaction
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
 
-from apps.users.permissions import IsRider, IsDriver
+from apps.users.permissions import IsRider,IsDriver
 from apps.rides.models import RideRequest
 from .models import Bid
 from .serializers import (

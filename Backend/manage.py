@@ -3,6 +3,14 @@
 import os
 import sys
 
+# Windows: register PostgreSQL bin dir so libgdal-35.dll and its
+# dependencies (libproj, libcurl, etc.) are resolved BEFORE Django imports.
+if os.name == 'nt':
+    _pg_bin = r'C:\Program Files\PostgreSQL\18\bin'
+    if os.path.isdir(_pg_bin):
+        os.add_dll_directory(_pg_bin)
+        os.environ['PATH'] = _pg_bin + ';' + os.environ.get('PATH', '')
+
 
 def main():
     """Run administrative tasks."""

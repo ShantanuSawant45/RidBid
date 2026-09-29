@@ -21,26 +21,40 @@ BUILT-IN PERMISSIONS WE USE:
 - AllowAny: anyone can access (used for registration/login)
 
 CUSTOM PERMISSIONS WE DEFINE:
-- IsRider: only users with role='rider' can access
-- IsDriver: only users with role='driver' can access
+- IsRider        : users with role='rider' OR 'rider_driver' can access
+- IsDriver       : users with role='driver' OR 'rider_driver' can access
+- IsRiderOrDriver: any logged-in user (all roles allowed) — useful for
+                   endpoints that both riders and drivers need
 - IsOwnerOrReadOnly: users can only edit their own data
+
+WHY INCLUDE 'rider_driver' IN BOTH IsRider AND IsDriver?
+A rider_driver user registered as both a rider and a driver. They should be
+able to use BOTH rider features (requesting rides) and driver features
+(bidding on rides). So IsRider and IsDriver both include 'rider_driver'.
 """
 
 from rest_framework.permissions import BasePermission
 
+# Import the Role choices to avoid hardcoding strings like 'rider'.
+# Using the enum means if we ever rename a role, we only change it in models.py.
+from .models import Role
+
 
 class IsRider(BasePermission):
     """
-    Permission that allows access ONLY to users with role='rider'.
+    Permission that allows access ONLY to users who can act as a rider.
+
+    ALLOWED ROLES: 'rider' and 'rider_driver'
+    DENIED ROLES: 'driver' (a driver-only user cannot request rides)
 
     USE CASE:
-    Only riders should be able to create ride requests. A driver shouldn't
-    be able to create a ride request because they're supposed to BID on
-    ride requests, not create them.
+    Only riders should be able to create ride requests. A driver-only user
+    shouldn't be able to create a ride request because they're supposed to
+    BID on ride requests, not create them.
 
     HOW IT'S USED:
     In a view, set: permission_classes = [IsAuthenticated, IsRider]
-    This means: user must be logged in AND be a rider.
+    This means: user must be logged in AND be a rider (or rider_driver).
 
     WHAT HAPPENS IF DENIED:
     DRF returns HTTP 403 Forbidden with the message defined in 'message'.
@@ -51,11 +65,9 @@ class IsRider(BasePermission):
 
     def has_permission(self, request, view):
         """
-        Check if the authenticated user has the 'rider' role.
+        Check if the authenticated user has a rider-compatible role.
 
-        This method is called automatically by DRF before the view
-        function/method runs. If it returns False, the view code
-        never executes and DRF returns a 403 response.
+        'rider_driver' users are included because they can also request rides.
 
         Args:
             request: The incoming HTTP request. request.user is the
@@ -63,49 +75,85 @@ class IsRider(BasePermission):
             view: The view class/function being accessed.
 
         Returns:
-            bool: True if the user is a rider, False otherwise.
+            bool: True if the user is a rider or rider_driver, False otherwise.
         """
-        # request.user.is_authenticated checks that the user is logged in
-        # (not an anonymous user). request.user.is_rider uses our custom
-        # property from the CustomUser model.
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.is_rider
+            # Check if the user's role is in the set of rider-compatible roles.
+            and request.user.role in (Role.RIDER, Role.RIDER_DRIVER)
         )
 
 
 class IsDriver(BasePermission):
     """
-    Permission that allows access ONLY to users with role='driver'.
+    Permission that allows access ONLY to users who can act as a driver.
+
+    ALLOWED ROLES: 'driver' and 'rider_driver'
+    DENIED ROLES: 'rider' (a rider-only user cannot place bids on rides)
 
     USE CASE:
     Only drivers should be able to place bids on ride requests.
-    A rider shouldn't be able to bid because they're the ones
+    A rider-only user shouldn't be able to bid because they're the ones
     requesting the ride.
 
     HOW IT'S USED:
     In a view, set: permission_classes = [IsAuthenticated, IsDriver]
-    This means: user must be logged in AND be a driver.
+    This means: user must be logged in AND be a driver (or rider_driver).
     """
 
     message = "Only drivers can perform this action."
 
     def has_permission(self, request, view):
         """
-        Check if the authenticated user has the 'driver' role.
+        Check if the authenticated user has a driver-compatible role.
 
         Args:
             request: The incoming HTTP request.
             view: The view being accessed.
 
         Returns:
-            bool: True if the user is a driver, False otherwise.
+            bool: True if the user is a driver or rider_driver, False otherwise.
         """
         return (
             request.user
             and request.user.is_authenticated
-            and request.user.is_driver
+            # Both 'driver' and 'rider_driver' roles can act as a driver.
+            and request.user.role in (Role.DRIVER, Role.RIDER_DRIVER)
+        )
+
+
+class IsRiderOrDriver(BasePermission):
+    """
+    Permission that allows access to ANY authenticated user regardless of role.
+
+    This exists for endpoints where both riders and drivers are valid
+    users — for example, viewing their own profile or changing their password.
+    It's semantically clearer than using just IsAuthenticated in places
+    where we want to be explicit that "both roles are welcome here".
+
+    In practice, this is equivalent to IsAuthenticated, but naming it
+    IsRiderOrDriver makes the intent clear at the view level.
+    """
+
+    message = "You must be a registered user to perform this action."
+
+    def has_permission(self, request, view):
+        """
+        Allow access to any authenticated user with a valid role.
+
+        Args:
+            request: The incoming HTTP request.
+            view: The view being accessed.
+
+        Returns:
+            bool: True if the user is authenticated, False otherwise.
+        """
+        return (
+            request.user
+            and request.user.is_authenticated
+            # All three roles are valid
+            and request.user.role in (Role.RIDER, Role.DRIVER, Role.RIDER_DRIVER)
         )
 
 
@@ -145,7 +193,7 @@ class IsOwnerOrReadOnly(BasePermission):
             request: The incoming HTTP request.
             view: The view being accessed.
             obj: The specific database object being accessed. For user
-                profiles, this is a CustomUser instance.
+                profiles, this is a User instance.
 
         Returns:
             bool: True if the request is safe (read-only) or if the user

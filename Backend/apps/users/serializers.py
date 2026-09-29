@@ -1,78 +1,82 @@
-"""
-Serializers for the Users app.
-
-WHAT ARE SERIALIZERS?
----------------------
-Serializers are the bridge between Python objects (Django models) and JSON data
-that gets sent over the internet to mobile apps or frontend clients.
-
-They do TWO jobs:
-  1. SERIALIZATION (Python → JSON): Take a CustomUser model instance and convert
-     it into a JSON dictionary like {"username": "john", "role": "rider", ...}
-     so it can be sent as an API response.
-
-  2. DESERIALIZATION (JSON → Python): Take incoming JSON data from a request
-     (like a registration form), validate it (is the email valid? is the password
-     strong enough?), and create/update a model instance in the database.
-
-Think of serializers as Django Forms, but for APIs instead of HTML pages.
-
-WHY THIS FILE?
---------------
-This file defines serializers for:
-  - UserRegistrationSerializer: handles new user sign-up (creates account)
-  - UserLoginSerializer: handles login (validates credentials, returns tokens)
-  - UserProfileSerializer: handles viewing/updating user profile info
-  - ChangePasswordSerializer: handles password change for logged-in users
-"""
-
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
-
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
+from .models import User, DriverDetail, RiderDetail, Role
 
-from .models import CustomUser
+
+class DriverDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the DriverDetail model.
+
+    WHAT IT DOES:
+    - READ  : converts a DriverDetail instance into JSON so the API can
+              return a driver's license info, vehicle info, rating, etc.
+    - WRITE : validates and saves incoming driver detail data (e.g., when
+              a driver updates their vehicle information).
+
+    This is a NESTED serializer — it will be embedded inside UserProfileSerializer
+    so that a driver's full profile looks like:
+    {
+        "id": 1,
+        "username": "...",
+        ...user fields...
+        "driver_detail": {          ← this is what DriverDetailSerializer produces
+            "license_number": "...",
+            "vehicle_type": "car",
+            ...
+        }
+    }
+    """
+    class Meta:
+        # Tell the serializer which model and which fields to use.
+        model = DriverDetail
+        fields = [
+            'license_number',   # Driver's license ID
+            'license_expiry',   # Expiry date for the license
+            'vehicle_number',   # License plate (e.g., "MH12AB1234")
+            'vehicle_type',     # car / bike / suv / van / truck
+            'vehicle_model',    # e.g., "Toyota Innova"
+            'is_approved',      # Set by admin, read-only for drivers
+            'rating',           # Driver's average rating
+            'is_online',        # Whether the driver is currently available
+        ]
+        # ---------------------------------------------------------------
+        # read_only_fields: these appear in responses but cannot be
+        # changed by the driver through this serializer. 'is_approved'
+        # should only be set by admins, not by the driver themselves.
+        # 'rating' is calculated from completed rides, not user-submitted.
+        # ---------------------------------------------------------------
+        read_only_fields = ['is_approved', 'rating']
+
+
+class RiderDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the RiderDetail model.
+
+    WHAT IT DOES:
+    Similar to DriverDetailSerializer but for rider-specific data.
+    A rider's profile extension stores their rating and home address.
+    """
+    class Meta:
+        model = RiderDetail
+        fields = [
+            'rating',                   # Rider's average rating (read-only)
+            'default_payment_method_id', # Stored payment method reference
+            'home_address',             # Rider's saved home address
+        ]
+        read_only_fields = ['rating']
+
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
-    """
-    Serializer for user registration (sign-up).
 
-    WHAT IT DOES:
-    - Accepts: username, email, password, password_confirm, role, phone_number
-    - Validates: passwords match, password is strong enough, email is unique
-    - Creates: a new CustomUser in the database with a hashed password
-    - Returns: the created user data (without password) + JWT tokens
-
-    HOW IT WORKS:
-    When a POST request comes in to /api/users/register/, DRF (Django REST Framework)
-    passes the JSON body to this serializer. The serializer:
-      1. Checks all field validations (required, max_length, etc.)
-      2. Runs custom validation methods (validate_email, validate)
-      3. If all validations pass, calls the create() method
-      4. Returns the serialized user data
-    """
-
-    # ---------------------------------------------------------------
-    # password: write_only=True means this field is accepted in input
-    #   but NEVER included in the output/response. You don't want to
-    #   send the password back in the API response!
-    # validators=[validate_password]: uses Django's built-in password
-    #   validators (minimum 8 chars, not too common, not all numeric, etc.)
-    # ---------------------------------------------------------------
     password = serializers.CharField(
         write_only=True,
         min_length=8,
         validators=[validate_password],
         help_text="Must be at least 8 characters, not entirely numeric, not too common."
     )
-
-    # ---------------------------------------------------------------
-    # password_confirm: a second password field to prevent typos.
-    #   This is NOT stored in the database — it only exists for validation.
-    #   write_only=True: same reason as password, never send it back.
-    # ---------------------------------------------------------------
     password_confirm = serializers.CharField(
         write_only=True,
         min_length=8,
@@ -80,55 +84,24 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        """
-        Meta class tells the serializer which model to use and which fields
-        to include. 'fields' lists every field this serializer handles.
-        'read_only_fields' are fields that appear in the response but
-        cannot be set by the user (Django manages them automatically).
-        """
-        model = CustomUser
+        model = User
         fields = [
-            'id',                # Auto-generated primary key (read-only)
-            'username',          # Required: unique login identifier
-            'email',             # Required: user's email address
-            'password',          # Required: will be hashed before storing
-            'password_confirm',  # Required: must match password
-            'role',              # Optional: defaults to 'rider'
-            'phone_number',      # Optional: contact number
-            'first_name',        # Optional: user's first name
-            'last_name',         # Optional: user's last name
+            'id',               # Auto-generated primary key (read-only)
+            'username',         # Required: unique login identifier
+            'email',            # Required: user's email address
+            'password',         # Required: will be hashed before storing
+            'password_confirm', # Required: must match password (not saved to DB)
+            'role',             # Optional: 'rider' | 'driver' | 'rider_driver'
+            'phone',            # Optional: contact number (unique)
+            'first_name',       # Optional: user's first name
+            'last_name',        # Optional: user's last name
         ]
         read_only_fields = ['id']
 
     def validate_email(self, value):
-        """
-        Custom validation for the email field.
-
-        This method is automatically called by DRF because it follows the
-        naming convention: validate_<field_name>. DRF calls it during
-        the validation phase with the email value.
-
-        WHY: We need to ensure no two users share the same email address.
-        Django's built-in User model doesn't enforce email uniqueness by
-        default (only username is unique), so we check manually.
-
-        Args:
-            value (str): The email address submitted by the user.
-
-        Returns:
-            str: The validated (lowercased) email address.
-
-        Raises:
-            serializers.ValidationError: If a user with this email already exists.
-        """
-        # .lower() normalizes the email so "John@Email.com" and "john@email.com"
-        # are treated as the same address.
+        # this method is called automatically by drf 
         value = value.lower()
-
-        # Check if any existing user already has this email address.
-        # .exists() is efficient — it stops at the first match instead of
-        # loading the entire user object from the database.
-        if CustomUser.objects.filter(email=value).exists():
+        if User.objects.filter(email=value).exists():
             raise serializers.ValidationError(
                 "A user with this email address already exists."
             )
@@ -136,74 +109,27 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        """
-        Object-level validation — runs AFTER all individual field validations.
-
-        This method receives ALL validated fields as a dictionary (attrs).
-        It's used for validations that depend on multiple fields — in this
-        case, checking that password and password_confirm match.
-
-        Args:
-            attrs (dict): Dictionary of all validated field values.
-                Example: {'username': 'john', 'password': 'Secret123!', ...}
-
-        Returns:
-            dict: The validated attributes (with password_confirm removed).
-
-        Raises:
-            serializers.ValidationError: If passwords don't match.
-        """
         if attrs['password'] != attrs['password_confirm']:
             raise serializers.ValidationError({
                 'password_confirm': "Passwords do not match."
             })
-
-        # Remove password_confirm from the data because it's not a model field.
-        # If we leave it in, Django will try to pass it to CustomUser.objects.create()
-        # and raise an error because 'password_confirm' is not a database column.
         attrs.pop('password_confirm')
-
         return attrs
 
     def create(self, validated_data):
-        """
-        Create and return a new CustomUser instance.
-
-        This method is called by the serializer's .save() method AFTER all
-        validations have passed. It receives the clean, validated data.
-
-        WHY create_user() INSTEAD OF create()?
-        We use create_user() instead of CustomUser.objects.create() because
-        create_user() automatically HASHES the password. If we used create(),
-        the raw password would be stored in the database as plain text — a
-        massive security vulnerability.
-
-        create_user() flow:
-          1. Takes the raw password ("Secret123!")
-          2. Hashes it using PBKDF2 algorithm with a random salt
-          3. Stores something like "pbkdf2_sha256$260000$salt$hash" in the DB
-          4. Creates the user record with all other fields
-
-        Args:
-            validated_data (dict): Clean data after all validations.
-                Example: {'username': 'john', 'password': 'Secret123!',
-                         'email': 'john@example.com', 'role': 'rider'}
-
-        Returns:
-            CustomUser: The newly created user instance.
-        """
-        # Pop the password out of validated_data because create_user()
-        # expects it as a separate argument, not inside **kwargs.
+        from django.db import transaction
         password = validated_data.pop('password')
+        role = validated_data.get('role', Role.RIDER)
+        with transaction.atomic():
+            user = User.objects.create_user(
+                password=password,
+                **validated_data
+            )
 
-        # create_user() is a method provided by Django's UserManager.
-        # It handles password hashing and normalizing the email.
-        # **validated_data unpacks the remaining fields (username, email,
-        # role, phone_number, etc.) as keyword arguments.
-        user = CustomUser.objects.create_user(
-            password=password,
-            **validated_data
-        )
+            if role in (Role.DRIVER, Role.RIDER_DRIVER):
+                DriverDetail.objects.create(user=user)
+            if role in (Role.RIDER, Role.RIDER_DRIVER):
+                RiderDetail.objects.create(user=user)
 
         return user
 
@@ -293,34 +219,57 @@ class UserLoginSerializer(serializers.Serializer):
         return attrs
 
 
+# ===========================================================================
+# PROFILE SERIALIZER
+# ===========================================================================
+
 class UserProfileSerializer(serializers.ModelSerializer):
     """
     Serializer for viewing and updating user profile.
 
     WHAT IT DOES:
     - READ: when a GET request comes in, this serializer converts the
-      CustomUser model instance into JSON with all the fields listed below.
+      User model instance into JSON. It also NESTS the appropriate
+      detail serializer (DriverDetailSerializer or RiderDetailSerializer)
+      so the full profile comes back in one response.
     - UPDATE: when a PATCH/PUT request comes in, this serializer validates
       the incoming data and updates the user's profile in the database.
 
+    NESTED SERIALIZERS (read-only):
+    The 'driver_detail' and 'rider_detail' fields use the SerializerMethodField
+    approach — they are computed dynamically based on the user's role, so that:
+      - A rider's profile shows 'rider_detail' (not 'driver_detail')
+      - A driver's profile shows 'driver_detail' (not 'rider_detail')
+      - A rider_driver shows BOTH
+
     SECURITY:
     - 'id', 'username', 'role', 'date_joined' are read_only — users cannot
-      change their username or role after registration (role changes could
-      be a separate admin-only feature).
+      change their username or role through this endpoint.
     - 'password' is NOT included — use the ChangePasswordSerializer instead.
     """
 
+    # ---------------------------------------------------------------
+    # SerializerMethodField: calls the method get_<field_name>() on this
+    # class. It's read-only by definition — perfect for computed/nested data.
+    # ---------------------------------------------------------------
+    driver_detail = serializers.SerializerMethodField()
+    rider_detail = serializers.SerializerMethodField()
+
     class Meta:
-        model = CustomUser
+        model = User
         fields = [
-            'id',              # Primary key, auto-generated, read-only
-            'username',        # Login identifier, read-only (can't change)
-            'email',           # Can be updated
-            'first_name',      # Can be updated
-            'last_name',       # Can be updated
-            'role',            # Read-only (rider/driver, set at registration)
-            'phone_number',    # Can be updated
-            'date_joined',     # Auto-set by Django, read-only
+            'id',               # Primary key, auto-generated, read-only
+            'username',         # Login identifier, read-only (can't change)
+            'email',            # Can be updated
+            'first_name',       # Can be updated
+            'last_name',        # Can be updated
+            'role',             # Read-only (rider/driver, set at registration)
+            'phone',            # Can be updated
+            'profile_picture_url', # Can be updated (URL to hosted image)
+            'is_verified',      # Set by admin verification flow, read-only
+            'date_joined',      # Auto-set by Django, read-only
+            'driver_detail',    # Nested DriverDetail data (read-only, computed)
+            'rider_detail',     # Nested RiderDetail data (read-only, computed)
         ]
         # ---------------------------------------------------------------
         # read_only_fields: these fields appear in API responses but cannot
@@ -328,7 +277,49 @@ class UserProfileSerializer(serializers.ModelSerializer):
         # silently ignore any values provided for these fields in a
         # PATCH/PUT request.
         # ---------------------------------------------------------------
-        read_only_fields = ['id', 'username', 'role', 'date_joined']
+        read_only_fields = [
+            'id', 'username', 'role', 'date_joined',
+            'is_verified', 'driver_detail', 'rider_detail'
+        ]
+
+    def get_driver_detail(self, obj):
+        """
+        Return serialized DriverDetail for this user, or None if they
+        are not a driver.
+
+        'obj' here is the User instance being serialized.
+        hasattr() safely checks whether the related object exists — if the
+        user has no DriverDetail row, accessing obj.driver_detail would raise
+        a RelatedObjectDoesNotExist exception. hasattr() catches that and
+        returns False instead of crashing.
+
+        Args:
+            obj (User): The user being serialized.
+
+        Returns:
+            dict | None: Serialized DriverDetail data, or None.
+        """
+        if hasattr(obj, 'driver_detail'):
+            return DriverDetailSerializer(obj.driver_detail).data
+        return None
+
+    def get_rider_detail(self, obj):
+        """
+        Return serialized RiderDetail for this user, or None if they
+        are not a rider.
+
+        Same logic as get_driver_detail above, but for the RiderDetail
+        related object.
+
+        Args:
+            obj (User): The user being serialized.
+
+        Returns:
+            dict | None: Serialized RiderDetail data, or None.
+        """
+        if hasattr(obj, 'rider_detail'):
+            return RiderDetailSerializer(obj.rider_detail).data
+        return None
 
     def validate_email(self, value):
         """
@@ -356,13 +347,17 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
         # .exclude(pk=self.instance.pk) removes the current user from
         # the query, so we only check if OTHER users have this email.
-        if CustomUser.objects.filter(email=value).exclude(pk=self.instance.pk).exists():
+        if User.objects.filter(email=value).exclude(pk=self.instance.pk).exists():
             raise serializers.ValidationError(
                 "A user with this email address already exists."
             )
 
         return value
 
+
+# ===========================================================================
+# CHANGE PASSWORD SERIALIZER
+# ===========================================================================
 
 class ChangePasswordSerializer(serializers.Serializer):
     """

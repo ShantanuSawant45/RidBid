@@ -1,5 +1,5 @@
 """
-Django Admin Configuration for CustomUser.
+Django Admin Configuration for the Users app.
 
 WHY CUSTOMIZE THE ADMIN?
 ------------------------
@@ -7,8 +7,11 @@ Django's built-in admin interface provides a powerful UI for managing database
 records directly from the browser (at /admin/). However, the default UserAdmin
 only knows about the built-in User fields (username, email, password, etc.).
 
-Since we added custom fields ('role' and 'phone_number') to our CustomUser model,
-we need to tell the admin interface about these fields so they appear in:
+Since we have:
+  - Custom fields on User ('role', 'phone', 'profile_picture_url', 'is_verified')
+  - Two related models (DriverDetail, RiderDetail) that store role-specific data
+
+...we need to tell the admin interface about ALL of these so they appear in:
   1. The user list page (list_display)
   2. The filter sidebar (list_filter)
   3. The search bar (search_fields)
@@ -18,20 +21,24 @@ we need to tell the admin interface about these fields so they appear in:
 We extend Django's built-in UserAdmin class (not plain ModelAdmin) because
 UserAdmin has special handling for password hashing, permission management,
 and other user-specific functionality that we want to keep.
+
+For DriverDetail and RiderDetail, we use plain ModelAdmin since they don't
+need any special user-auth handling.
 """
 
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin
 
-from .models import CustomUser
+# Import all three of our models.
+from .models import User, DriverDetail, RiderDetail
 
 
-@admin.register(CustomUser)
+@admin.register(User)
 class CustomUserAdmin(UserAdmin):
     """
-    Admin panel configuration for the CustomUser model.
+    Admin panel configuration for the User model.
 
-    By using @admin.register(CustomUser), this class is automatically
+    By using @admin.register(User), this class is automatically
     registered with Django's admin site. This means when you visit
     /admin/, you'll see a "Users" section that uses this configuration.
 
@@ -44,25 +51,25 @@ class CustomUserAdmin(UserAdmin):
     """
 
     # ---------------------------------------------------------------
-    # list_display: columns shown on the user list page (/admin/users/customuser/).
+    # list_display: columns shown on the user list page (/admin/users/user/).
     # Each string is a field name from the model. The admin renders
     # a table with these columns so you can quickly scan all users.
     # ---------------------------------------------------------------
-    list_display = ('username', 'email', 'role', 'phone_number', 'is_active')
+    list_display = ('username', 'email', 'role', 'phone', 'is_verified', 'is_active')
 
     # ---------------------------------------------------------------
     # list_filter: filter options shown in the right sidebar.
     # Clicking "rider" shows only riders, clicking "driver" shows only drivers.
     # This is extremely useful when you have thousands of users.
     # ---------------------------------------------------------------
-    list_filter = ('role', 'is_active', 'is_staff')
+    list_filter = ('role', 'is_verified', 'is_active', 'is_staff')
 
     # ---------------------------------------------------------------
     # search_fields: fields that the search bar at the top of the list
     # page will search through. If an admin types "john", Django will
-    # search username, email, and phone_number for matches.
+    # search username, email, and phone for matches.
     # ---------------------------------------------------------------
-    search_fields = ('username', 'email', 'phone_number')
+    search_fields = ('username', 'email', 'phone')
 
     # ---------------------------------------------------------------
     # fieldsets: defines the layout of the user EDIT form.
@@ -75,7 +82,7 @@ class CustomUserAdmin(UserAdmin):
     # ---------------------------------------------------------------
     fieldsets = UserAdmin.fieldsets + (
         ('RideBid Info', {
-            'fields': ('role', 'phone_number'),
+            'fields': ('role', 'phone', 'profile_picture_url', 'is_verified'),
         }),
     )
 
@@ -87,6 +94,66 @@ class CustomUserAdmin(UserAdmin):
     # ---------------------------------------------------------------
     add_fieldsets = UserAdmin.add_fieldsets + (
         ('RideBid Info', {
-            'fields': ('role', 'phone_number'),
+            'fields': ('role', 'phone', 'email'),
         }),
     )
+
+
+@admin.register(DriverDetail)
+class DriverDetailAdmin(admin.ModelAdmin):
+    """
+    Admin panel configuration for the DriverDetail model.
+
+    This allows admins to:
+    - View all driver profiles in a table
+    - Approve or reject drivers (toggle is_approved)
+    - Search for a driver by their username or email
+    - Filter by approval status or vehicle type
+
+    NOTE: DriverDetail has a OneToOne relationship with User.
+    Each row in this table belongs to exactly one driver.
+    """
+
+    # ---------------------------------------------------------------
+    # list_display: these columns are shown in the DriverDetail list view.
+    # 'user' will display the string representation of the User
+    # (which is "email (role)" as defined in our __str__ method).
+    # ---------------------------------------------------------------
+    list_display = ('user', 'vehicle_type', 'vehicle_number', 'is_approved', 'is_online', 'rating')
+
+    # ---------------------------------------------------------------
+    # list_filter: allows filtering the driver list by these fields.
+    # Very useful for finding all unapproved drivers, for example.
+    # ---------------------------------------------------------------
+    list_filter = ('is_approved', 'is_online', 'vehicle_type')
+
+    # ---------------------------------------------------------------
+    # search_fields: the admin search bar will look through these fields.
+    # 'user__username' uses Django's double-underscore syntax to traverse
+    # the ForeignKey relationship and search the related User's username.
+    # ---------------------------------------------------------------
+    search_fields = ('user__username', 'user__email', 'license_number', 'vehicle_number')
+
+    # ---------------------------------------------------------------
+    # readonly_fields: these fields are shown in the edit form but
+    # cannot be changed. 'rating' is computed from completed rides,
+    # so admins shouldn't manually set it here.
+    # ---------------------------------------------------------------
+    readonly_fields = ('rating', 'created_at', 'updated_at')
+
+
+@admin.register(RiderDetail)
+class RiderDetailAdmin(admin.ModelAdmin):
+    """
+    Admin panel configuration for the RiderDetail model.
+
+    Simpler than DriverDetailAdmin because riders have fewer managed fields.
+    Admins mainly use this to look up a rider's rating or home address.
+    """
+
+    list_display = ('user', 'rating', 'home_address')
+
+    search_fields = ('user__username', 'user__email')
+
+    # 'rating' is computed from completed rides; admins shouldn't set it manually.
+    readonly_fields = ('rating',)

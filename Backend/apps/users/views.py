@@ -1,43 +1,3 @@
-"""
-API Views for the Users app.
-
-WHAT ARE VIEWS?
----------------
-Views are Python functions or classes that receive HTTP requests and return
-HTTP responses. They are the "controller" in the MVC pattern — they sit
-between the URL routing and the serializers/models, orchestrating the
-request-response cycle.
-
-DJANGO REST FRAMEWORK VIEWS:
-DRF provides several view classes with increasing levels of abstraction:
-
-  1. APIView (we use this for login/register):
-     - Low-level: you manually handle GET, POST, PUT, DELETE methods.
-     - Full control over the logic inside each method.
-     - Best for custom logic that doesn't map to simple CRUD operations.
-
-  2. GenericAPIView + Mixins:
-     - Mid-level: provides common patterns like list, create, retrieve, update.
-     - You compose behavior by mixing in classes.
-
-  3. ViewSet (not used here yet):
-     - High-level: combines list + create + retrieve + update + delete into
-       one class with automatic URL routing.
-
-REQUEST FLOW:
-  1. Client sends HTTP request → Django matches URL pattern
-  2. URL pattern routes to a view class/function
-  3. DRF runs authentication (JWT token check)
-  4. DRF runs permission checks (IsAuthenticated, IsRider, etc.)
-  5. DRF calls the appropriate method (get, post, put, patch, delete)
-  6. The view method processes the request and returns a Response
-
-VIEWS IN THIS FILE:
-  - RegisterView: POST /api/users/register/ — create new account
-  - LoginView: POST /api/users/login/ — authenticate and get tokens
-  - ProfileView: GET/PUT/PATCH /api/users/profile/ — view/edit own profile
-  - ChangePasswordView: POST /api/users/change-password/ — change password
-"""
 
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -45,62 +5,22 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import CustomUser
+# Import our models and serializers.
+from .models import User, DriverDetail, RiderDetail, Role
 from .serializers import (
     UserRegistrationSerializer,
     UserLoginSerializer,
     UserProfileSerializer,
+    DriverDetailSerializer,
+    RiderDetailSerializer,
     ChangePasswordSerializer,
 )
+# Import our custom role-based permission classes.
+from .permissions import IsDriver, IsRider, IsRiderOrDriver
 
 
 def get_tokens_for_user(user):
-    """
-    Generate JWT access and refresh tokens for a given user.
-
-    HOW JWT TOKENS WORK:
-    JWT (JSON Web Token) is a compact, URL-safe token format. Each token
-    contains encoded JSON data (called "claims") that includes:
-      - user_id: which user this token belongs to
-      - exp: when the token expires
-      - iat: when the token was issued
-      - jti: unique token identifier
-
-    The token is digitally signed with our SECRET_KEY, so the server can
-    verify it hasn't been tampered with. The client cannot modify the
-    token without invalidating the signature.
-
-    TWO TYPES OF TOKENS:
-    1. Access Token (short-lived, 30 minutes):
-       - Sent with every API request in the Authorization header
-       - Example: "Authorization: Bearer eyJ0eXAiOiJKV1Q..."
-       - If stolen, the damage is limited because it expires quickly
-
-    2. Refresh Token (long-lived, 7 days):
-       - Used ONLY to get a new access token
-       - Sent to /api/users/token/refresh/ when the access token expires
-       - Should be stored securely by the client
-
-    WHY TWO TOKENS?
-    If we only had one long-lived token, a stolen token would give an
-    attacker access for a long time. With two tokens:
-    - The frequently-used access token expires quickly (30 min)
-    - The refresh token is used rarely and can be rotated/blacklisted
-
-    Args:
-        user (CustomUser): The user to generate tokens for.
-
-    Returns:
-        dict: A dictionary with 'refresh' and 'access' token strings.
-            Example: {
-                'refresh': 'eyJ0eXAiOiJKV1QiLCJhbGci...',
-                'access': 'eyJ0eXAiOiJKV1QiLCJhbGci...'
-            }
-    """
-    # RefreshToken.for_user() creates a refresh token with the user's ID
-    # encoded in it. The access token is derived from the refresh token.
     refresh = RefreshToken.for_user(user)
-
     return {
         'refresh': str(refresh),
         'access': str(refresh.access_token),
@@ -108,104 +28,12 @@ def get_tokens_for_user(user):
 
 
 class RegisterView(APIView):
-    """
-    API endpoint for user registration (sign-up).
-
-    URL: POST /api/users/register/
-    Authentication: None required (AllowAny)
-    Rate limiting: Should be added in production to prevent abuse
-
-    REQUEST BODY (JSON):
-    {
-        "username": "john_doe",
-        "email": "john@example.com",
-        "password": "SecurePass123!",
-        "password_confirm": "SecurePass123!",
-        "role": "rider",         // optional, defaults to "rider"
-        "phone_number": "+919876543210",  // optional
-        "first_name": "John",    // optional
-        "last_name": "Doe"       // optional
-    }
-
-    SUCCESS RESPONSE (201 Created):
-    {
-        "message": "Registration successful.",
-        "user": {
-            "id": 1,
-            "username": "john_doe",
-            "email": "john@example.com",
-            "role": "rider",
-            ...
-        },
-        "tokens": {
-            "access": "eyJ0eXAiOi...",
-            "refresh": "eyJ0eXAiOi..."
-        }
-    }
-
-    ERROR RESPONSE (400 Bad Request):
-    {
-        "email": ["A user with this email address already exists."],
-        "password": ["This password is too common."]
-    }
-    """
-
-    # ---------------------------------------------------------------
-    # permission_classes: controls who can access this endpoint.
-    # AllowAny means no authentication is required — anyone can
-    # register, even without a JWT token. This makes sense because
-    # you can't have a token before you have an account!
-    # ---------------------------------------------------------------
     permission_classes = [AllowAny]
-
     def post(self, request):
-        """
-        Handle POST request to create a new user account.
-
-        STEP-BY-STEP FLOW:
-        1. DRF receives the POST request with JSON body
-        2. We pass request.data to the serializer for validation
-        3. serializer.is_valid() runs all validations:
-           - Field-level: required fields present, types correct
-           - Custom: email uniqueness, password strength, passwords match
-        4. If invalid, return 400 with error details
-        5. If valid, serializer.save() calls create() which:
-           - Hashes the password
-           - Creates the user in the database
-        6. Generate JWT tokens for the new user
-        7. Return 201 with user data + tokens
-
-        Args:
-            request: The HTTP request object. request.data contains
-                the parsed JSON body (DRF handles JSON parsing
-                automatically based on the Content-Type header).
-
-        Returns:
-            Response: DRF Response object with:
-                - 201 status + user data + tokens on success
-                - 400 status + error details on validation failure
-        """
-        # Pass the incoming JSON data to the serializer for validation.
-        # data=request.data tells the serializer "validate and deserialize this".
         serializer = UserRegistrationSerializer(data=request.data)
-
-        # is_valid() runs ALL validations:
-        # 1. Required field checks
-        # 2. Field type checks (CharField, EmailField, etc.)
-        # 3. Custom validators (validate_email, validate, etc.)
-        # raise_exception=True makes DRF automatically return a 400 response
-        # with error details if validation fails, so we don't need an else branch.
         serializer.is_valid(raise_exception=True)
-
-        # .save() calls the serializer's create() method because this is a
-        # new object (no existing instance was passed to the serializer).
-        # It returns the newly created CustomUser instance.
         user = serializer.save()
-
-        # Generate JWT tokens so the user is immediately logged in
-        # after registration (no need for a separate login request).
         tokens = get_tokens_for_user(user)
-
         return Response(
             {
                 'message': 'Registration successful.',
@@ -235,15 +63,18 @@ class LoginView(APIView):
         "user": {
             "id": 1,
             "username": "john_doe",
-            "email": "john@example.com",
             "role": "rider",
-            ...
+            "rider_detail": { ... },  // only present for riders/rider_drivers
+            "driver_detail": { ... }  // only present for drivers/rider_drivers
         },
         "tokens": {
             "access": "eyJ0eXAiOi...",
             "refresh": "eyJ0eXAiOi..."
         }
     }
+
+    The frontend uses the 'role' field in the response to decide
+    which dashboard/UI to show the user after login.
 
     ERROR RESPONSE (400 Bad Request):
     {
@@ -263,11 +94,8 @@ class LoginView(APIView):
         3. If invalid credentials → return 400 error
         4. If valid → extract the user object
         5. Generate JWT tokens for the user
-        6. Return 200 with user data + tokens
-
-        The client (mobile app / frontend) should store the tokens:
-        - Access token: sent in the Authorization header for subsequent requests
-        - Refresh token: stored securely, used to get new access tokens
+        6. Return 200 with full user profile (including role-specific nested data)
+           so the frontend can immediately render the correct role-based UI
 
         Args:
             request: The HTTP request with username and password in the body.
@@ -287,6 +115,9 @@ class LoginView(APIView):
         return Response(
             {
                 'message': 'Login successful.',
+                # UserProfileSerializer includes driver_detail and rider_detail
+                # nested fields. The frontend checks user.role and user.driver_detail
+                # or user.rider_detail to render the correct dashboard.
                 'user': UserProfileSerializer(user).data,
                 'tokens': tokens,
             },
@@ -311,17 +142,16 @@ class ProfileView(APIView):
         "id": 1,
         "username": "john_doe",
         "email": "john@example.com",
-        "first_name": "John",
-        "last_name": "Doe",
         "role": "rider",
-        "phone_number": "+919876543210",
-        "date_joined": "2026-04-23T00:00:00Z"
+        "phone": "+919876543210",
+        "rider_detail": { "rating": 4.5, "home_address": "..." },
+        "driver_detail": null
     }
 
-    PATCH REQUEST (partial update):
+    PATCH REQUEST (partial update — only send changed fields):
     {
         "first_name": "Johnny",
-        "phone_number": "+919999999999"
+        "phone": "+919999999999"
     }
 
     DIFFERENCE BETWEEN PUT AND PATCH:
@@ -392,7 +222,7 @@ class ProfileView(APIView):
 
         EXAMPLE:
         If the user only wants to update their phone number, they send:
-        {"phone_number": "+919999999999"}
+        {"phone": "+919999999999"}
         And email, first_name, last_name, etc. remain unchanged.
 
         Args:
@@ -416,6 +246,136 @@ class ProfileView(APIView):
             {
                 'message': 'Profile updated successfully.',
                 'user': serializer.data,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class DriverDetailUpdateView(APIView):
+    """
+    API endpoint for drivers to update their driver-specific information.
+
+    URL: PATCH /api/users/driver-detail/
+    Authentication: Required (JWT Bearer token)
+    Permission: Only users with role='driver' or 'rider_driver' can access this.
+
+    This endpoint lets a driver update their vehicle and license info.
+    Fields like 'is_approved' and 'rating' are read-only and cannot be
+    changed by the driver themselves.
+
+    REQUEST BODY (JSON — send only fields you want to update):
+    {
+        "vehicle_number": "MH12AB1234",
+        "vehicle_type": "car",
+        "vehicle_model": "Toyota Innova",
+        "is_online": true
+    }
+
+    SUCCESS RESPONSE (200 OK):
+    {
+        "message": "Driver details updated successfully.",
+        "driver_detail": {
+            "license_number": "...",
+            "vehicle_type": "car",
+            ...
+        }
+    }
+    """
+
+    # ---------------------------------------------------------------
+    # IsRiderOrDriver: a custom permission that allows access to users
+    # who have the 'driver' or 'rider_driver' role. Riders-only cannot
+    # access this endpoint.
+    # ---------------------------------------------------------------
+    permission_classes = [IsAuthenticated, IsDriver]
+
+    def patch(self, request):
+        """
+        Partially update the authenticated driver's DriverDetail record.
+
+        get_or_create() is used as a safety net: it either fetches the
+        existing DriverDetail, or creates a new empty one if it somehow
+        doesn't exist. This prevents a 404 crash even if the detail record
+        was somehow not created at registration.
+
+        Args:
+            request: The HTTP request with partial driver detail data.
+
+        Returns:
+            Response: 200 with updated driver_detail, or 400 with errors.
+        """
+        # get_or_create() returns a tuple: (instance, created_bool).
+        # We only need the instance, so we use [0] to unpack it.
+        driver_detail, _ = DriverDetail.objects.get_or_create(user=request.user)
+
+        serializer = DriverDetailSerializer(
+            instance=driver_detail,
+            data=request.data,
+            partial=True  # Only update the fields that were sent
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {
+                'message': 'Driver details updated successfully.',
+                'driver_detail': serializer.data,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+class RiderDetailUpdateView(APIView):
+    """
+    API endpoint for riders to update their rider-specific information.
+
+    URL: PATCH /api/users/rider-detail/
+    Authentication: Required (JWT Bearer token)
+    Permission: Only users with role='rider' or 'rider_driver' can access this.
+
+    REQUEST BODY (JSON — send only fields you want to update):
+    {
+        "home_address": "123 MG Road, Pune",
+        "default_payment_method_id": "pm_abc123"
+    }
+
+    SUCCESS RESPONSE (200 OK):
+    {
+        "message": "Rider details updated successfully.",
+        "rider_detail": {
+            "rating": 4.8,
+            "home_address": "123 MG Road, Pune",
+            ...
+        }
+    }
+    """
+
+    permission_classes = [IsAuthenticated, IsRider]
+
+    def patch(self, request):
+        """
+        Partially update the authenticated rider's RiderDetail record.
+
+        Args:
+            request: The HTTP request with partial rider detail data.
+
+        Returns:
+            Response: 200 with updated rider_detail, or 400 with errors.
+        """
+        rider_detail, _ = RiderDetail.objects.get_or_create(user=request.user)
+
+        serializer = RiderDetailSerializer(
+            instance=rider_detail,
+            data=request.data,
+            partial=True
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        return Response(
+            {
+                'message': 'Rider details updated successfully.',
+                'rider_detail': serializer.data,
             },
             status=status.HTTP_200_OK
         )
