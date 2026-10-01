@@ -2,6 +2,37 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 
+import { MapContainer, TileLayer, Marker, Polyline, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+const MapUpdater = ({ pickupCoords, dropoffCoords }) => {
+  const map = useMap();
+  
+  React.useEffect(() => {
+    if (pickupCoords && dropoffCoords) {
+      const bounds = L.latLngBounds(
+        [pickupCoords.lat, pickupCoords.lon],
+        [dropoffCoords.lat, dropoffCoords.lon]
+      );
+      map.fitBounds(bounds, { padding: [50, 50] });
+    } else if (pickupCoords) {
+      map.setView([pickupCoords.lat, pickupCoords.lon], 15);
+    } else if (dropoffCoords) {
+      map.setView([dropoffCoords.lat, dropoffCoords.lon], 15);
+    }
+  }, [pickupCoords, dropoffCoords, map]);
+
+  return null;
+};
+
 const RiderDashboard = () => {
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
@@ -287,54 +318,50 @@ const RiderDashboard = () => {
         </div>
 
         {/* Right Side: Map Area (Simulated for Brutalist design) */}
-        <div className="flex-1 bg-[#111] border-2 border-white brutal-shadow relative overflow-hidden min-h-[400px] lg:min-h-0 group">
-          {/* Faux Map Grid Pattern */}
-          <div className="absolute inset-0 opacity-20 pointer-events-none"
-            style={{ backgroundImage: 'linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000), linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000)', backgroundSize: '60px 60px', backgroundPosition: '0 0, 30px 30px' }}>
-          </div>
+        <div className="flex-1 bg-[#111] border-2 border-white brutal-shadow relative z-0 min-h-[400px] lg:min-h-0">
+          <MapContainer 
+            center={[20.5937, 78.9629]} 
+            zoom={5} 
+            style={{ height: '100%', width: '100%', backgroundColor: '#111' }}
+            zoomControl={false}
+          >
+            <TileLayer
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+              className="map-tiles"
+            />
+            
+            <MapUpdater pickupCoords={pickupCoords} dropoffCoords={dropoffCoords} />
 
-          {/* Map Overlay UI */}
-          <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none">
+            {pickupCoords && (
+              <Marker position={[pickupCoords.lat, pickupCoords.lon]} />
+            )}
+
+            {dropoffCoords && (
+              <Marker position={[dropoffCoords.lat, dropoffCoords.lon]} />
+            )}
+
+            {pickupCoords && dropoffCoords && (
+              <Polyline 
+                positions={[
+                  [pickupCoords.lat, pickupCoords.lon],
+                  [dropoffCoords.lat, dropoffCoords.lon]
+                ]} 
+                color="#4f772d" 
+                weight={4}
+                dashArray="10, 10"
+              />
+            )}
+          </MapContainer>
+
+          <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none z-[400]">
             <div className="bg-black border-2 border-white px-3 py-1 font-mono text-xs brutal-shadow-white pointer-events-auto">
-              MAP_DATA_STREAM :: ACTIVE
-            </div>
-            <div className="flex flex-col gap-2 pointer-events-auto">
-              <button className="w-10 h-10 bg-white text-black border-2 border-black font-bold brutal-shadow-hover flex items-center justify-center text-xl hover:bg-gray-200">
-                +
-              </button>
-              <button className="w-10 h-10 bg-white text-black border-2 border-black font-bold brutal-shadow-hover flex items-center justify-center text-xl hover:bg-gray-200">
-                -
-              </button>
-              <button className="w-10 h-10 mt-4 bg-ridebid-green text-black border-2 border-black font-bold brutal-shadow-hover flex items-center justify-center hover:bg-green-400">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="3 11 22 2 13 21 11 13 3 11"></polygon>
-                </svg>
-              </button>
+              MAP_DATA_STREAM :: LIVE
             </div>
           </div>
-
-          {/* Central Map Marker (Faux) */}
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center">
-            <div className="bg-black text-white font-mono text-xs px-2 py-1 border border-ridebid-green mb-1 whitespace-nowrap animate-pulse">
-              {pickup ? 'CURRENT ORIGIN' : 'LOCATING...'}
-            </div>
-            <div className="w-4 h-4 bg-ridebid-green border-2 border-white rotate-45 transform origin-center shadow-[0_0_15px_#4f772d]"></div>
-            <div className="w-1 h-8 bg-gradient-to-b from-ridebid-green to-transparent"></div>
-            <div className="w-8 h-2 bg-black/50 blur rounded-full mt-1"></div>
-          </div>
-
-          {/* Random moving blips simulating cars */}
-          {pickup && (
-            <>
-              <div className="absolute top-1/4 left-1/3 w-3 h-3 bg-yellow-400 border border-black animate-pulse" style={{ animationDuration: '3s' }}></div>
-              <div className="absolute bottom-1/3 right-1/4 w-3 h-3 bg-yellow-400 border border-black animate-pulse" style={{ animationDuration: '2s' }}></div>
-              <div className="absolute top-2/3 left-1/4 w-3 h-3 bg-yellow-400 border border-black animate-pulse" style={{ animationDuration: '4s' }}></div>
-            </>
-          )}
-
+          
           {isSearching && (
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-30">
-              <div className="bg-black border-2 border-ridebid-green p-8 max-w-sm w-full mx-4 text-center brutal-shadow">
+            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[500]">
+              <div className="bg-black border-2 border-ridebid-green p-8 max-w-sm w-full mx-4 text-center brutal-shadow pointer-events-auto">
                 <div className="w-12 h-12 border-4 border-gray-800 border-t-ridebid-green rounded-full animate-spin mx-auto mb-6"></div>
                 <h3 className="text-xl font-bold uppercase mb-2">Finding Drivers</h3>
                 <p className="font-mono text-sm text-gray-400">Broadcasting your request to the network...</p>
@@ -361,6 +388,9 @@ const RiderDashboard = () => {
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
           background: #4f772d;
+        }
+        .map-tiles {
+          filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
         }
         .animate-fade-in {
           animation: fadeIn 0.3s ease-out forwards;
