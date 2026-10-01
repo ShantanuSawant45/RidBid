@@ -5,13 +5,12 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from apps.tasks.tasks import expire_ride
-from apps.tasks.tasks import expire_ride
 
 from rest_framework.views import APIView
 
 from apps.users.permissions import IsRider, IsDriver
 
-from .models import RideRequest
+from .models import RideRequest, Status, VehicleType
 from .serializers import (
     RideCreateSerializer,
     RideListSerializer,
@@ -28,14 +27,6 @@ class RideCreateView(APIView):
         serializer = RideCreateSerializer(data=request.data,context={'request': request})
         serializer.is_valid(raise_exception=True)
         ride = serializer.save()
-        expire_ride.apply_async(args=[ride.id], countdown=900)
-        return Response(
-            {
-                'message': 'Ride request created successfully.',
-                'ride': RideDetailSerializer(ride).data,
-            },
-            status=status.HTTP_201_CREATED
-        )
         expire_ride.apply_async(args=[ride.id], countdown=900)
         return Response(
             {
@@ -163,15 +154,14 @@ class AvailableRidesView(APIView):
             Response: 200 with list of available rides.
         """
         rides = RideRequest.objects.filter(
-            status__in=[RideRequest.Status.REQUESTED, RideRequest.Status.BIDDING]
+            status__in=[Status.REQUESTED, Status.BIDDING]
         ).select_related('rider')
 
         # Optional vehicle type filter.
         vehicle_type = request.query_params.get('vehicle_type')
         if vehicle_type:
-            # Filter rides that match the vehicle type OR accept 'any' vehicle.
             rides = rides.filter(
-                vehicle_type__in=[vehicle_type, RideRequest.VehicleType.ANY]
+                vehicle_type__in=[vehicle_type, VehicleType.ANY]
             )
 
         serializer = RideListSerializer(rides, many=True)
@@ -300,7 +290,7 @@ class NearbyRidesView(APIView):
         # for fast spatial filtering.
         # ---------------------------------------------------------------
         rides = RideRequest.objects.filter(
-            status__in=[RideRequest.Status.REQUESTED, RideRequest.Status.BIDDING],
+            status__in=[Status.REQUESTED, Status.BIDDING],
             pickup_location__dwithin=(driver_location, D(km=radius)),
         ).select_related('rider')
 
@@ -515,7 +505,7 @@ class RideCancelView(APIView):
         # Update the status to cancelled.
         # update_fields=['status', 'updated_at'] is an optimization that tells
         # Django to only update these two columns, not all columns.
-        ride.status = RideRequest.Status.CANCELLED
+        ride.status = Status.CANCELLED
         ride.save(update_fields=['status', 'updated_at'])
 
         return Response(
