@@ -1,40 +1,12 @@
-"""
-API Views for the Rides app.
-
-WHAT THESE VIEWS DO:
---------------------
-These views handle all ride request operations — creating rides, listing
-available rides, viewing ride details, updating rides, and cancelling rides.
-
-VIEWS IN THIS FILE:
-  1. RideCreateView: POST /api/rides/ — create a new ride request (riders only)
-  2. MyRidesView: GET /api/rides/my-rides/ — list rides created by the logged-in rider
-  3. AvailableRidesView: GET /api/rides/available/ — list biddable rides (drivers only)
-  4. NearbyRidesView: GET /api/rides/nearby/ — find rides near a driver's location
-  5. RideDetailView: GET /api/rides/<id>/ — view full details of a ride
-  6. RideUpdateView: PATCH /api/rides/<id>/update/ — update a ride (ride owner only)
-  7. RideCancelView: POST /api/rides/<id>/cancel/ — cancel a ride (ride owner only)
-
-PERMISSION RULES:
-  - Creating rides: riders only (drivers bid on rides, they don't create them)
-  - Listing own rides: riders see their rides, drivers see rides they bid on
-  - Available rides: drivers only (they need to see rides they can bid on)
-  - Nearby rides: drivers only (geospatial query for rides near their location)
-  - Ride detail: any authenticated user
-  - Update/Cancel: ride owner (rider who created it) only
-
-GEOSPATIAL QUERIES:
-  The NearbyRidesView uses PostGIS ST_DWithin to find rides within a specified
-  radius of the driver's current location. This uses the spatial indexes we
-  defined on the PointFields for fast, efficient queries.
-"""
-
 from django.contrib.gis.geos import Point
 from django.contrib.gis.measure import D
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from apps.tasks.tasks import expire_ride
+from apps.tasks.tasks import expire_ride
+
 from rest_framework.views import APIView
 
 from apps.users.permissions import IsRider, IsDriver
@@ -49,84 +21,22 @@ from .serializers import (
 
 
 class RideCreateView(APIView):
-    """
-    API endpoint for creating a new ride request.
 
-    URL: POST /api/rides/
-    Authentication: Required (JWT Bearer token)
-    Permission: Riders only (drivers cannot create ride requests)
-
-    REQUEST BODY (JSON):
-    {
-        "pickup_latitude": 17.3850,
-        "pickup_longitude": 78.4867,
-        "pickup_address": "Hitech City Metro Station, Hyderabad",
-        "dropoff_latitude": 17.4399,
-        "dropoff_longitude": 78.3810,
-        "dropoff_address": "Gachibowli Stadium, Hyderabad",
-        "vehicle_type": "sedan",
-        "number_of_passengers": 2,
-        "scheduled_time": "2026-04-25T10:00:00+05:30",
-        "notes": "I have a suitcase"
-    }
-
-    SUCCESS RESPONSE (201 Created):
-    {
-        "message": "Ride request created successfully.",
-        "ride": {
-            "id": 1,
-            "rider_username": "john_doe",
-            "pickup_address": "Hitech City Metro Station, Hyderabad",
-            ...
-        }
-    }
-    """
-
-    # Only authenticated riders can create ride requests.
-    # IsAuthenticated checks the JWT token is valid.
-    # IsRider checks that the user's role is 'rider'.
-    # Both must pass — if either fails, the request is denied.
     permission_classes = [IsAuthenticated, IsRider]
 
     def post(self, request):
-        """
-        Handle POST request to create a new ride request.
-
-        FLOW:
-        1. Validate the incoming JSON data via RideCreateSerializer
-        2. Serializer converts lat/lng into PostGIS Point objects
-        3. Serializer creates the RideRequest in the database
-        4. Return the created ride details using RideDetailSerializer
-
-        The rider is automatically set from the JWT token (request.user),
-        NOT from the request body. This is a security measure — it prevents
-        users from creating rides on behalf of other users.
-
-        Args:
-            request: HTTP request with ride details in the body.
-
-        Returns:
-            Response: 201 with ride details, or 400 with validation errors.
-        """
-        # context={'request': request} passes the request to the serializer
-        # so it can access request.user to set the rider.
-        serializer = RideCreateSerializer(
-            data=request.data,
-            context={'request': request}
-        )
+        serializer = RideCreateSerializer(data=request.data,context={'request': request})
         serializer.is_valid(raise_exception=True)
         ride = serializer.save()
-
-        # ---------------------------------------------------------------
-        # Phase 6: Background Tasks
-        # Schedule the ride to auto-expire in 15 minutes (900 seconds)
-        # if no bids are accepted.
-        # ---------------------------------------------------------------
-        from apps.tasks.tasks import expire_ride
         expire_ride.apply_async(args=[ride.id], countdown=900)
-
-        # Use RideDetailSerializer for the response to include all fields
-        # (including computed properties like is_biddable).
+        return Response(
+            {
+                'message': 'Ride request created successfully.',
+                'ride': RideDetailSerializer(ride).data,
+            },
+            status=status.HTTP_201_CREATED
+        )
+        expire_ride.apply_async(args=[ride.id], countdown=900)
         return Response(
             {
                 'message': 'Ride request created successfully.',

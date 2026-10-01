@@ -36,10 +36,9 @@ objects can't be directly deserialized from JSON — they need special handling.
 """
 
 from django.contrib.gis.geos import Point
-
 from rest_framework import serializers
-
 from .models import RideRequest
+from apps.bids.serializers import BidListSerializer
 
 
 class RideCreateSerializer(serializers.ModelSerializer):
@@ -119,21 +118,6 @@ class RideCreateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def validate_pickup_latitude(self, value):
-        """
-        Validate that pickup latitude is within valid range.
-
-        Latitude must be between -90 (South Pole) and +90 (North Pole).
-        Values outside this range are geographically impossible.
-
-        Args:
-            value (float): The latitude value to validate.
-
-        Returns:
-            float: The validated latitude.
-
-        Raises:
-            serializers.ValidationError: If latitude is out of range.
-        """
         if not -90 <= value <= 90:
             raise serializers.ValidationError(
                 "Latitude must be between -90 and 90."
@@ -141,18 +125,6 @@ class RideCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_pickup_longitude(self, value):
-        """
-        Validate that pickup longitude is within valid range.
-
-        Longitude must be between -180 (International Date Line, west)
-        and +180 (International Date Line, east).
-
-        Args:
-            value (float): The longitude value to validate.
-
-        Returns:
-            float: The validated longitude.
-        """
         if not -180 <= value <= 180:
             raise serializers.ValidationError(
                 "Longitude must be between -180 and 180."
@@ -160,7 +132,6 @@ class RideCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_dropoff_latitude(self, value):
-        """Validate dropoff latitude range (-90 to 90)."""
         if not -90 <= value <= 90:
             raise serializers.ValidationError(
                 "Latitude must be between -90 and 90."
@@ -168,7 +139,6 @@ class RideCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_dropoff_longitude(self, value):
-        """Validate dropoff longitude range (-180 to 180)."""
         if not -180 <= value <= 180:
             raise serializers.ValidationError(
                 "Longitude must be between -180 and 180."
@@ -176,18 +146,6 @@ class RideCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate_number_of_passengers(self, value):
-        """
-        Validate passenger count is between 1 and 8.
-
-        Most vehicles can't carry more than 8 passengers, and a ride
-        with 0 passengers doesn't make sense.
-
-        Args:
-            value (int): The number of passengers.
-
-        Returns:
-            int: The validated passenger count.
-        """
         if value < 1 or value > 8:
             raise serializers.ValidationError(
                 "Number of passengers must be between 1 and 8."
@@ -195,34 +153,11 @@ class RideCreateSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
-        """
-        Object-level validation: ensure pickup and dropoff are different.
-
-        If the pickup and dropoff coordinates are identical (or extremely
-        close), the ride doesn't make sense — you can't take a ride to
-        the same location you're already at.
-
-        We compare using a small threshold (0.0001 degrees ≈ 11 meters)
-        instead of exact equality because GPS coordinates can have tiny
-        floating-point differences.
-
-        Args:
-            attrs (dict): All validated field values.
-
-        Returns:
-            dict: The validated attributes.
-
-        Raises:
-            serializers.ValidationError: If pickup equals dropoff.
-        """
         pickup_lat = attrs.get('pickup_latitude')
         pickup_lng = attrs.get('pickup_longitude')
         dropoff_lat = attrs.get('dropoff_latitude')
         dropoff_lng = attrs.get('dropoff_longitude')
 
-        # Check if pickup and dropoff are essentially the same point.
-        # abs() gives the absolute difference. 0.0001 degrees is about
-        # 11 meters at the equator — close enough to be "same place".
         if (abs(pickup_lat - dropoff_lat) < 0.0001 and
                 abs(pickup_lng - dropoff_lng) < 0.0001):
             raise serializers.ValidationError(
@@ -232,50 +167,16 @@ class RideCreateSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        """
-        Create a new RideRequest with PostGIS Point objects.
-
-        This method is called by serializer.save() after all validations pass.
-        It does three things:
-          1. Extracts the lat/lng values from validated_data
-          2. Converts them into PostGIS Point objects
-          3. Creates the RideRequest in the database
-
-        WHY Point(longitude, latitude)?
-        PostGIS uses (x, y) coordinate order, where x=longitude and y=latitude.
-        This is the OPPOSITE of how we normally say coordinates ("lat, lng").
-        Getting this wrong is a VERY common bug that causes rides to appear
-        in the wrong location (e.g., in the ocean instead of on land).
-
-        The rider is automatically set from the JWT token (request.user),
-        NOT from the request body. This prevents users from creating rides
-        on behalf of other users.
-
-        Args:
-            validated_data (dict): Clean data after all validations.
-
-        Returns:
-            RideRequest: The newly created ride request.
-        """
-        # Pop the coordinate values — these are NOT model fields, so we
-        # can't pass them directly to RideRequest.objects.create().
         pickup_lat = validated_data.pop('pickup_latitude')
         pickup_lng = validated_data.pop('pickup_longitude')
         dropoff_lat = validated_data.pop('dropoff_latitude')
         dropoff_lng = validated_data.pop('dropoff_longitude')
 
-        # Create PostGIS Point objects from the coordinates.
-        # Point(x, y) = Point(longitude, latitude) — longitude comes first!
-        # srid=4326 tells PostGIS this uses the WGS 84 coordinate system.
         pickup_point = Point(pickup_lng, pickup_lat, srid=4326)
         dropoff_point = Point(dropoff_lng, dropoff_lat, srid=4326)
 
-        # Get the rider from the request context.
-        # self.context['request'] is passed automatically by DRF when
-        # the serializer is created in the view.
         rider = self.context['request'].user
 
-        # Create the ride request with all validated data.
         ride = RideRequest.objects.create(
             rider=rider,
             pickup_location=pickup_point,
@@ -425,6 +326,8 @@ class RideDetailSerializer(serializers.ModelSerializer):
     is_active = serializers.SerializerMethodField()
     can_cancel = serializers.SerializerMethodField()
 
+    bids = BidListSerializer(many=True, read_only=True)
+
     class Meta:
         model = RideRequest
         fields = [
@@ -445,6 +348,7 @@ class RideDetailSerializer(serializers.ModelSerializer):
             'can_cancel',
             'created_at',
             'updated_at',
+            'bids',
         ]
 
     def get_rider_username(self, obj):

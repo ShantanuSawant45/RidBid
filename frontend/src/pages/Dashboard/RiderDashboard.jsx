@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
+import axios from 'axios';
 
 const RiderDashboard = () => {
   const [pickup, setPickup] = useState('');
@@ -7,17 +8,93 @@ const RiderDashboard = () => {
   const [vehicle, setVehicle] = useState('car');
   const [isSearching, setIsSearching] = useState(false);
 
-  const handleRequestRide = (e) => {
+  const [pickupCoords, SetPickupCoords] = useState(null)
+  const [dropoffCoords, SetDropoffCoords] = useState(null)
+  const [activeField, setActiveField] = useState(null)
+  const [error, setError] = useState(null)
+  const [activeRide, setActiveRide] = useState(null)
+  const [suggestion, setSuggestion] = useState(null)
+
+
+
+  const handleSearch = async (query, type) => {
+
+    if (type === 'pickup') setPickup(query);
+    else setDropoff(query);
+
+
+    setActiveField(type);
+
+    if (query.length < 3) {
+      setSuggestion([])
+      return
+    }
+    try {
+
+      const res = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=5`);
+      setSuggestion(res.data);
+    } catch (err) {
+      console.error("Error fetching locations", err);
+    }
+  };
+
+  // this fucntion is called when the user clicks on any suggestion 
+
+  const handleSelectLocation = (loc, type) => {
+
+    if (type === 'pickup') {
+      setPickup(loc.display_name);
+      SetPickupCoords({ lat: parseFloat(loc.lat), lon: parseFloat(loc.lon) });
+    }
+    else {
+      setDropoff(loc.display_name);
+      SetDropoffCoords({ lat: parseFloat(loc.lat), lon: parseFloat(loc.lon) });
+    }
+    setSuggestion([]);
+    setActiveField(null);
+
+  };
+
+
+  const handleRequestRide = async (e) => {
     e.preventDefault();
-    if (!pickup || !dropoff) return;
-    
+    setError('');
+
+    if (!pickupCoords || !dropoffCoords) {
+      setError('Please select locations from the dropdown suggestions');
+      return;
+    }
+
     setIsSearching(true);
-    
-    // Simulate searching for a driver
-    setTimeout(() => {
+
+    try {
+      const token = localStorage.getItem('access_token');
+
+      const payload = {
+        pickup_latitude: pickupCoords.lat,
+        pickup_longitude: pickupCoords.lon,
+        pickup_address: pickup,
+        dropoff_latitude: dropoffCoords.lat,
+        dropoff_longitude: dropoffCoords.lon,
+        dropoff_address: dropoff,
+        vehicle_type: vehicle,
+        number_of_passengers: 1
+      };
+
+      const response = await axios.post("http://localhost:8000/api/rides/", payload, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
       setIsSearching(false);
-      alert('Drivers found! Initiating bidding process...');
-    }, 3000);
+      setActiveRide(response.data.ride);
+      setError(null);
+
+    }
+    catch (err) {
+      setIsSearching(false);
+      setError(err.response?.data?.error || err.response?.data?.non_field_errors?.[0] || 'Failed to create ride');
+    }
   };
 
   const vehicleOptions = [
@@ -29,8 +106,8 @@ const RiderDashboard = () => {
   return (
     <div className="min-h-screen bg-ridebid-black flex flex-col font-sans selection:bg-ridebid-green selection:text-black text-white">
       {/* Decorative Grid Background */}
-      <div className="fixed inset-0 opacity-10 pointer-events-none" 
-           style={{ backgroundImage: 'linear-gradient(#4f772d 1px, transparent 1px), linear-gradient(90deg, #4f772d 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
+      <div className="fixed inset-0 opacity-10 pointer-events-none"
+        style={{ backgroundImage: 'linear-gradient(#4f772d 1px, transparent 1px), linear-gradient(90deg, #4f772d 1px, transparent 1px)', backgroundSize: '40px 40px' }}>
       </div>
 
       {/* Top Navbar */}
@@ -56,10 +133,10 @@ const RiderDashboard = () => {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col lg:flex-row relative z-10 p-4 lg:p-6 gap-6 lg:h-[calc(100vh-76px)]">
-        
+
         {/* Left Side: Ride Booking Panel */}
         <div className="w-full lg:w-[400px] flex flex-col gap-6 lg:h-full lg:overflow-y-auto pb-6 custom-scrollbar">
-          
+
           <div className="bg-black border-2 border-white brutal-shadow">
             <div className="bg-white p-2 border-b-2 border-white flex justify-between items-center">
               <span className="text-black font-mono text-xs font-bold uppercase tracking-widest">
@@ -70,7 +147,7 @@ const RiderDashboard = () => {
                 <div className="w-3 h-3 border-2 border-black bg-ridebid-green"></div>
               </div>
             </div>
-            
+
             <div className="p-6">
               <h2 className="text-2xl font-extrabold uppercase mb-6 tracking-tight">
                 WHERE TO?
@@ -79,28 +156,66 @@ const RiderDashboard = () => {
               <form onSubmit={handleRequestRide} className="flex flex-col gap-5">
                 <div className="relative">
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 bg-white border-2 border-black"></div>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     placeholder="ENTER PICKUP LOCATION"
                     value={pickup}
-                    onChange={(e) => setPickup(e.target.value)}
+                    onChange={(e) => handleSearch(e.target.value, 'pickup')}
+                    onFocus={() => setActiveField('pickup')}
                     className="w-full bg-transparent border-2 border-gray-600 text-white p-3 pl-10 font-mono text-sm focus:outline-none focus:border-ridebid-green focus:bg-gray-900 transition-colors uppercase placeholder-gray-600"
                     required
                   />
+
+                  {/* Suggestions */}
+                  {activeField === 'pickup' && suggestion?.length > 0 && (
+                    <div className="absolute left-0 right-0 mt-1 bg-black border-2 border-white max-h-48 overflow-y-auto z-20">
+                      {suggestion.map((loc, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => handleSelectLocation(loc, 'pickup')}
+                          className="p-3 hover:bg-ridebid-green hover:text-black cursor-pointer border-b border-gray-600 last:border-0 flex flex-col"
+                        >
+                          <span className="font-bold text-sm">{loc.display_name}</span>
+                          <span className="text-xs text-gray-400">{loc.type}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+
                   {/* Connecting Line */}
                   <div className="absolute left-[21px] top-[calc(100%-8px)] h-8 border-l-2 border-dashed border-gray-600 z-10"></div>
                 </div>
 
                 <div className="relative mt-2">
                   <div className="absolute left-4 top-1/2 -translate-y-1/2 w-3 h-3 bg-ridebid-green border-2 border-black"></div>
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     placeholder="ENTER DROP-OFF LOCATION"
                     value={dropoff}
-                    onChange={(e) => setDropoff(e.target.value)}
+                    onChange={(e) => handleSearch(e.target.value, 'dropoff')}
+                    onFocus={() => setActiveField('dropoff')}
                     className="w-full bg-transparent border-2 border-gray-600 text-white p-3 pl-10 font-mono text-sm focus:outline-none focus:border-ridebid-green focus:bg-gray-900 transition-colors uppercase placeholder-gray-600"
                     required
                   />
+
+                  {/* Suggestions */}
+                  {activeField === 'dropoff' && suggestion?.length > 0 && (
+                    <div className="absolute left-0 right-0 mt-1 bg-black border-2 border-white max-h-48 overflow-y-auto z-20">
+                      {suggestion.map((loc, idx) => (
+                        <div
+                          key={idx}
+                          onClick={() => handleSelectLocation(loc, 'dropoff')}
+                          className="p-3 hover:bg-ridebid-green hover:text-black cursor-pointer border-b border-gray-600 last:border-0 flex flex-col"
+                        >
+                          <span className="font-bold text-sm">{loc.display_name}</span>
+                          <span className="text-xs text-gray-400">{loc.type}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+
                 </div>
 
                 {pickup && dropoff && (
@@ -108,13 +223,13 @@ const RiderDashboard = () => {
                     <h3 className="font-mono text-xs font-bold text-gray-400 mb-3 tracking-widest">SELECT VEHICLE</h3>
                     <div className="flex flex-col gap-3">
                       {vehicleOptions.map((opt) => (
-                        <div 
+                        <div
                           key={opt.id}
                           onClick={() => setVehicle(opt.id)}
                           className={`
                             border-2 p-3 flex items-center justify-between cursor-pointer transition-all
-                            ${vehicle === opt.id 
-                              ? 'border-ridebid-green bg-gray-900 brutal-shadow' 
+                            ${vehicle === opt.id
+                              ? 'border-ridebid-green bg-gray-900 brutal-shadow'
                               : 'border-gray-800 hover:border-gray-600 bg-black'}
                           `}
                         >
@@ -138,7 +253,7 @@ const RiderDashboard = () => {
                       <p className="text-[10px] text-gray-500 font-mono">Final price determined by driver bidding system.</p>
                     </div>
 
-                    <button 
+                    <button
                       type="submit"
                       disabled={isSearching}
                       className="w-full mt-6 bg-ridebid-green text-black font-bold uppercase tracking-widest px-6 py-4 brutal-shadow-white transition-all border-2 border-transparent hover:border-white font-mono disabled:opacity-50 disabled:cursor-not-allowed group relative overflow-hidden"
@@ -174,10 +289,10 @@ const RiderDashboard = () => {
         {/* Right Side: Map Area (Simulated for Brutalist design) */}
         <div className="flex-1 bg-[#111] border-2 border-white brutal-shadow relative overflow-hidden min-h-[400px] lg:min-h-0 group">
           {/* Faux Map Grid Pattern */}
-          <div className="absolute inset-0 opacity-20 pointer-events-none" 
-               style={{ backgroundImage: 'linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000), linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000)', backgroundSize: '60px 60px', backgroundPosition: '0 0, 30px 30px' }}>
+          <div className="absolute inset-0 opacity-20 pointer-events-none"
+            style={{ backgroundImage: 'linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000), linear-gradient(45deg, #000 25%, transparent 25%, transparent 75%, #000 75%, #000)', backgroundSize: '60px 60px', backgroundPosition: '0 0, 30px 30px' }}>
           </div>
-          
+
           {/* Map Overlay UI */}
           <div className="absolute top-4 left-4 right-4 flex justify-between items-start pointer-events-none">
             <div className="bg-black border-2 border-white px-3 py-1 font-mono text-xs brutal-shadow-white pointer-events-auto">
@@ -207,7 +322,7 @@ const RiderDashboard = () => {
             <div className="w-1 h-8 bg-gradient-to-b from-ridebid-green to-transparent"></div>
             <div className="w-8 h-2 bg-black/50 blur rounded-full mt-1"></div>
           </div>
-          
+
           {/* Random moving blips simulating cars */}
           {pickup && (
             <>
@@ -223,7 +338,7 @@ const RiderDashboard = () => {
                 <div className="w-12 h-12 border-4 border-gray-800 border-t-ridebid-green rounded-full animate-spin mx-auto mb-6"></div>
                 <h3 className="text-xl font-bold uppercase mb-2">Finding Drivers</h3>
                 <p className="font-mono text-sm text-gray-400">Broadcasting your request to the network...</p>
-                <button 
+                <button
                   onClick={() => setIsSearching(false)}
                   className="mt-6 border-b-2 border-red-500 text-red-500 font-mono text-xs uppercase hover:text-red-400 transition-colors pb-1"
                 >
